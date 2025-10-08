@@ -21,12 +21,19 @@ const validateParams = (requiredParams) => {
 
       // Additional validation based on parameter name
       if (param === 'identifier') {
+        // Debug logging
+        console.log(`🔍 Validating identifier: "${value}" (type: ${typeof value})`);
+        console.log(`🔍 Regex test /^\\d+$/: ${/^\d+$/.test(value)}`);
+        console.log(`🔍 Regex test /^\\d{10,13}$/: ${/^\d{10,13}$/.test(value)}`);
+        
         // Block identifier should be numeric or valid timestamp
         if (!/^\d+$/.test(value) && !/^\d{10,13}$/.test(value)) {
+          console.log(`❌ Validation failed for identifier: "${value}"`);
           return res.status(400).json({
             error: 'Block identifier must be a valid block number or timestamp'
           });
         }
+        console.log(`✅ Validation passed for identifier: "${value}"`);
       }
 
       if (param === 'assetId' || param === 'exchangeId' || param === 'pairId') {

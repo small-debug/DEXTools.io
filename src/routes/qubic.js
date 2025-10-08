@@ -1,6 +1,6 @@
 const express = require('express');
 const { QubicClient } = require('../services/qubicClient');
-const { validateParams } = require('../middleware/validation');
+const { validateParams, validateQuery } = require('../middleware/validation');
 
 const router = express.Router();
 const qubicClient = new QubicClient();
@@ -39,6 +39,23 @@ router.get('/block/:identifier', validateParams(['identifier']), async (req, res
 });
 
 /**
+ * @route GET /api/v1/asset/holders
+ * @desc Get asset holders with pagination
+ * @access Public
+ */
+router.get('/asset/holders', validateQuery(['id', 'page', 'pageSize']), async (req, res, next) => {
+  try {
+    const { id, page = 1, pageSize = 10 } = req.query;
+    const holders = await qubicClient.getAssetHolders(id, parseInt(page), parseInt(pageSize));
+    
+    // Return data in DEXTools format
+    res.json(holders);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/v1/asset/:assetId
  * @desc Get asset/token information by ID
  * @access Public
@@ -56,8 +73,25 @@ router.get('/asset/:assetId', validateParams(['assetId']), async (req, res, next
 });
 
 /**
+ * @route GET /api/v1/exchange
+ * @desc Get exchange/DEX information by ID or factory address (query parameter)
+ * @access Public
+ */
+router.get('/exchange', validateQuery(['id']), async (req, res, next) => {
+  try {
+    const { id } = req.query;
+    const exchange = await qubicClient.getExchange(id);
+    
+    // Return data in DEXTools format
+    res.json(exchange);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/v1/exchange/:exchangeId
- * @desc Get exchange/DEX information by ID or factory address
+ * @desc Get exchange/DEX information by ID or factory address (path parameter)
  * @access Public
  */
 router.get('/exchange/:exchangeId', validateParams(['exchangeId']), async (req, res, next) => {
