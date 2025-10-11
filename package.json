@@ -9,6 +9,9 @@
     "test": "jest",
     "test:format": "node test-response-format.js",
     "test:qubic": "node test-qubic-connection.js",
+    "test:pair": "node test-pair-endpoint.js",
+    "test:rpc-structure": "node test-rpc-response-structure.js",
+    "test:hardcoded": "node test-hardcoded-response.js",
     "setup": "node scripts/setup.js",
     "example": "node examples/usage.js"
   },

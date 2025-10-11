@@ -40,7 +40,12 @@ const validateParams = (requiredParams) => {
         // These should be non-empty strings
         if (typeof value !== 'string' || value.length < 1) {
           return res.status(400).json({
-            error: `Parameter '${param}' must be a valid string`
+            code: 'VALIDATION_ERROR',
+            message: 'Validation failed',
+            issues: [{
+              param,
+              message: `Parameter '${param}' must be a valid string`
+            }]
           });
         }
       }
@@ -57,8 +62,11 @@ const validateQuery = (allowedParams) => {
     
     if (invalidParams.length > 0) {
       return res.status(400).json({
-        error: `Invalid query parameters: ${invalidParams.join(', ')}`,
-        allowedParams
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        issues: [{
+          message: `Invalid query parameters: ${invalidParams.join(', ')}`
+        }]
       });
     }
 
@@ -67,7 +75,12 @@ const validateQuery = (allowedParams) => {
     for (const param of numericParams) {
       if (req.query[param] && isNaN(Number(req.query[param]))) {
         return res.status(400).json({
-          error: `Parameter '${param}' must be a number`
+          code: 'VALIDATION_ERROR',
+          message: 'Validation failed',
+          issues: [{
+            param,
+            message: `Parameter '${param}' must be a number`
+          }]
         });
       }
     }
@@ -75,13 +88,23 @@ const validateQuery = (allowedParams) => {
     // Validate page and limit ranges
     if (req.query.page && (Number(req.query.page) < 1)) {
       return res.status(400).json({
-        error: 'Page number must be greater than 0'
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        issues: [{
+          param: 'page',
+          message: 'Page number must be greater than 0'
+        }]
       });
     }
 
     if (req.query.limit && (Number(req.query.limit) < 1 || Number(req.query.limit) > 1000)) {
       return res.status(400).json({
-        error: 'Limit must be between 1 and 1000'
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        issues: [{
+          param: 'limit',
+          message: 'Limit must be between 1 and 1000'
+        }]
       });
     }
 

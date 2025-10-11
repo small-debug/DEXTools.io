@@ -20,8 +20,11 @@ A JavaScript API project that provides DEXTools integration methods for Qubic bl
 | `GET` | `/api/v1/latest-block` | Get the latest block information |
 | `GET` | `/api/v1/block/:identifier` | Get block by number or timestamp |
 | `GET` | `/api/v1/asset/:assetId` | Get asset/token information by ID |
+| `GET` | `/api/v1/asset/holders` | Get asset holders with pagination |
 | `GET` | `/api/v1/exchange/:exchangeId` | Get exchange/DEX information |
+| `GET` | `/api/v1/exchange?id=:exchangeId` | Get exchange/DEX information (query param) |
 | `GET` | `/api/v1/pair/:pairId` | Get trading pair information |
+| `GET` | `/api/v1/pair?id=:pairId` | Get trading pair information (query param) |
 | `GET` | `/api/v1/events` | Get events with optional filters |
 
 ### Utility Endpoints
@@ -115,7 +118,11 @@ curl http://localhost:3000/api/v1/exchange/0x5678...
 
 ### Get Trading Pair
 ```bash
-curl http://localhost:3000/api/v1/pair/pair123
+# Using query parameter
+curl "http://localhost:3000/api/v1/pair?id=PAIRADDRESSEXAMPLE"
+
+# Using path parameter
+curl http://localhost:3000/api/v1/pair/PAIRADDRESSEXAMPLE
 ```
 
 ### Get Events with Filters
@@ -172,21 +179,17 @@ All API responses follow the DEXTools Integration SDK specification:
 }
 ```
 
-### Pair Endpoint (`/pair/:pairId`)
+### Pair Endpoint (`/pair` or `/pair/:pairId`)
 ```json
 {
   "pair": {
-    "id": "pair123",
-    "token0": "0x1111...",
-    "token1": "0x2222...",
-    "reserve0": "1000000",
-    "reserve1": "2000000",
-    "totalSupply": "1000000",
-    "kLast": "2000000000000",
-    "price0CumulativeLast": "1000000",
-    "price1CumulativeLast": "2000000",
-    "createdAt": 1630000000,
-    "exchange": "exchange123"
+    "id": "PAIRADDRESSEXAMPLE",
+    "asset0Id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB",
+    "asset1Id": "PAIRADDRESSEXAMPLE",
+    "createdAtBlockNumber": 12345,
+    "createdAtBlockTimestamp": 1630000000,
+    "createdAtTxnId": "txn123abc",
+    "factoryAddress": "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID"
   }
 }
 ```
@@ -228,7 +231,17 @@ All API responses follow the DEXTools Integration SDK specification:
 Run the test suite:
 
 ```bash
+# Run all tests
 npm test
+
+# Test Qubic RPC connection
+npm run test:qubic
+
+# Test response format
+npm run test:format
+
+# Test pair endpoint
+npm run test:pair
 ```
 
 ## 📚 API Documentation

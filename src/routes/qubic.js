@@ -107,8 +107,34 @@ router.get('/exchange/:exchangeId', validateParams(['exchangeId']), async (req, 
 });
 
 /**
+ * @route GET /api/v1/pair
+ * @desc Get trading pair information by ID (query parameter)
+ * @access Public
+ */
+router.get('/pair', async (req, res, next) => {
+  try {
+    const { id } = req.query;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required query parameter: id',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const pair = await qubicClient.getPair(id);
+    
+    // Return data in DEXTools format
+    res.json(pair);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/v1/pair/:pairId
- * @desc Get trading pair information by ID
+ * @desc Get trading pair information by ID (path parameter)
  * @access Public
  */
 router.get('/pair/:pairId', validateParams(['pairId']), async (req, res, next) => {
@@ -222,17 +248,33 @@ router.get('/docs', (req, res) => {
       },
       {
         method: 'GET',
+        path: '/pair',
+        description: 'Get trading pair information by ID (query parameter)',
+        parameters: [
+          {
+            name: 'id',
+            type: 'string',
+            required: true,
+            description: 'Pair ID (identity address)',
+            in: 'query'
+          }
+        ],
+        example: '/api/v1/pair?id=PAIRADDRESSEXAMPLE'
+      },
+      {
+        method: 'GET',
         path: '/pair/:pairId',
-        description: 'Get trading pair information by ID',
+        description: 'Get trading pair information by ID (path parameter)',
         parameters: [
           {
             name: 'pairId',
             type: 'string',
             required: true,
-            description: 'Pair ID'
+            description: 'Pair ID (identity address)',
+            in: 'path'
           }
         ],
-        example: '/api/v1/pair/pair123'
+        example: '/api/v1/pair/PAIRADDRESSEXAMPLE'
       },
       {
         method: 'GET',
