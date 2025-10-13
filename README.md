@@ -18,13 +18,15 @@ A JavaScript API project that provides DEXTools integration methods for Qubic bl
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/latest-block` | Get the latest block information |
-| `GET` | `/api/v1/block/:identifier` | Get block by number or timestamp |
-| `GET` | `/api/v1/asset/:assetId` | Get asset/token information by ID |
+| `GET` | `/api/v1/block?number=:number` | Get block by number (query param) |
+| `GET` | `/api/v1/block/:identifier` | Get block by number or timestamp (path param) |
+| `GET` | `/api/v1/asset?id=:id` | Get asset/token information by ID (query param) |
+| `GET` | `/api/v1/asset/:assetId` | Get asset/token information by ID (path param) |
 | `GET` | `/api/v1/asset/holders` | Get asset holders with pagination |
-| `GET` | `/api/v1/exchange/:exchangeId` | Get exchange/DEX information |
-| `GET` | `/api/v1/exchange?id=:exchangeId` | Get exchange/DEX information (query param) |
-| `GET` | `/api/v1/pair/:pairId` | Get trading pair information |
-| `GET` | `/api/v1/pair?id=:pairId` | Get trading pair information (query param) |
+| `GET` | `/api/v1/exchange?id=:id` | Get exchange/DEX information (query param) |
+| `GET` | `/api/v1/exchange/:exchangeId` | Get exchange/DEX information (path param) |
+| `GET` | `/api/v1/pair?id=:id` | Get trading pair information (query param) |
+| `GET` | `/api/v1/pair/:pairId` | Get trading pair information (path param) |
 | `GET` | `/api/v1/events` | Get events with optional filters |
 
 ### Utility Endpoints
@@ -103,16 +105,28 @@ curl http://localhost:3000/api/v1/latest-block
 
 ### Get Specific Block
 ```bash
+# Using query parameter (recommended)
+curl "http://localhost:3000/api/v1/block?number=12345"
+
+# Using path parameter
 curl http://localhost:3000/api/v1/block/12345
 ```
 
 ### Get Asset Information
 ```bash
+# Using query parameter (recommended)
+curl "http://localhost:3000/api/v1/asset?id=0x1234..."
+
+# Using path parameter
 curl http://localhost:3000/api/v1/asset/0x1234...
 ```
 
 ### Get Exchange Information
 ```bash
+# Using query parameter (recommended)
+curl "http://localhost:3000/api/v1/exchange?id=0x5678..."
+
+# Using path parameter
 curl http://localhost:3000/api/v1/exchange/0x5678...
 ```
 

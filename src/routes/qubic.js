@@ -22,8 +22,34 @@ router.get('/latest-block', async (req, res, next) => {
 });
 
 /**
+ * @route GET /api/v1/block
+ * @desc Get block by number (query parameter)
+ * @access Public
+ */
+router.get('/block', async (req, res, next) => {
+  try {
+    const { number } = req.query;
+    
+    if (!number) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required query parameter: number',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const block = await qubicClient.getBlock(number);
+    
+    // Return data in DEXTools format
+    res.json(block);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/v1/block/:identifier
- * @desc Get block by number or timestamp
+ * @desc Get block by number or timestamp (path parameter)
  * @access Public
  */
 router.get('/block/:identifier', validateParams(['identifier']), async (req, res, next) => {
@@ -56,8 +82,34 @@ router.get('/asset/holders', validateQuery(['id', 'page', 'pageSize']), async (r
 });
 
 /**
+ * @route GET /api/v1/asset
+ * @desc Get asset/token information by ID (query parameter)
+ * @access Public
+ */
+router.get('/asset', async (req, res, next) => {
+  try {
+    const { id } = req.query;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required query parameter: id',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const asset = await qubicClient.getAsset(id);
+    
+    // Return data in DEXTools format
+    res.json(asset);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * @route GET /api/v1/asset/:assetId
- * @desc Get asset/token information by ID
+ * @desc Get asset/token information by ID (path parameter)
  * @access Public
  */
 router.get('/asset/:assetId', validateParams(['assetId']), async (req, res, next) => {
@@ -77,9 +129,18 @@ router.get('/asset/:assetId', validateParams(['assetId']), async (req, res, next
  * @desc Get exchange/DEX information by ID or factory address (query parameter)
  * @access Public
  */
-router.get('/exchange', validateQuery(['id']), async (req, res, next) => {
+router.get('/exchange', async (req, res, next) => {
   try {
     const { id } = req.query;
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required query parameter: id',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     const exchange = await qubicClient.getExchange(id);
     
     // Return data in DEXTools format
@@ -206,42 +267,90 @@ router.get('/docs', (req, res) => {
       },
       {
         method: 'GET',
+        path: '/block',
+        description: 'Get block by number (query parameter)',
+        parameters: [
+          {
+            name: 'number',
+            type: 'string|number',
+            required: true,
+            description: 'Block number',
+            in: 'query'
+          }
+        ],
+        example: '/api/v1/block?number=12345'
+      },
+      {
+        method: 'GET',
         path: '/block/:identifier',
-        description: 'Get block by number or timestamp',
+        description: 'Get block by number or timestamp (path parameter)',
         parameters: [
           {
             name: 'identifier',
             type: 'string|number',
             required: true,
-            description: 'Block number or timestamp'
+            description: 'Block number or timestamp',
+            in: 'path'
           }
         ],
         example: '/api/v1/block/12345'
       },
       {
         method: 'GET',
+        path: '/asset',
+        description: 'Get asset/token information by ID (query parameter)',
+        parameters: [
+          {
+            name: 'id',
+            type: 'string',
+            required: true,
+            description: 'Asset ID or contract address',
+            in: 'query'
+          }
+        ],
+        example: '/api/v1/asset?id=0x1234...'
+      },
+      {
+        method: 'GET',
         path: '/asset/:assetId',
-        description: 'Get asset/token information by ID',
+        description: 'Get asset/token information by ID (path parameter)',
         parameters: [
           {
             name: 'assetId',
             type: 'string',
             required: true,
-            description: 'Asset ID or contract address'
+            description: 'Asset ID or contract address',
+            in: 'path'
           }
         ],
         example: '/api/v1/asset/0x1234...'
       },
       {
         method: 'GET',
+        path: '/exchange',
+        description: 'Get exchange/DEX information by ID or factory address (query parameter)',
+        parameters: [
+          {
+            name: 'id',
+            type: 'string',
+            required: true,
+            description: 'Exchange ID or factory address',
+            in: 'query'
+          }
+        ],
+        example: '/api/v1/exchange?id=0x5678...'
+      },
+      {
+        method: 'GET',
         path: '/exchange/:exchangeId',
-        description: 'Get exchange/DEX information by ID or factory address',
+        description: 'Get exchange/DEX information by ID or factory address (path parameter)',
         parameters: [
           {
             name: 'exchangeId',
             type: 'string',
             required: true,
-            description: 'Exchange ID or factory address'
+            description: 'Exchange ID or factory address',
+            in: 'path'
           }
         ],
         example: '/api/v1/exchange/0x5678...'

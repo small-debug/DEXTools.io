@@ -12,6 +12,7 @@
     "test:pair": "node test-pair-endpoint.js",
     "test:rpc-structure": "node test-rpc-response-structure.js",
     "test:hardcoded": "node test-hardcoded-response.js",
+    "test:query-params": "node test-query-parameters.js",
     "setup": "node scripts/setup.js",
     "example": "node examples/usage.js"
   },
