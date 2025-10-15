@@ -325,11 +325,17 @@ class QubicClient {
    */
   async getEvents(filters = {}) {
     try {
-      const params = new URLSearchParams(filters);
-      const response = await this.client.get(`/events?${params}`);
-      return this.transformEvents(response.data);
+      const { fromBlock, toBlock } = filters;
+      
+      // Use the events data collector to get processed events
+      const EventsDataCollector = require('./eventsDataCollector');
+      const collector = new EventsDataCollector();
+      
+      const events = await collector.getEventsData(fromBlock, toBlock);
+      
+      return this.transformEvents({ events });
     } catch (error) {
-      throw new QubicRpcError(`Failed to fetch events: ${error.message}`, error.status);
+      throw new QubicRpcError(`Failed to fetch events: ${error.message}`, error.status || 500);
     }
   }
 
@@ -497,26 +503,30 @@ class QubicClient {
    * @returns {Object} Transformed data in DEXTools format
    */
   transformEvents(data) {
-    const events = (data.events || data.transactions || []).map(event => ({
-      id: event.id || event.hash || '',
-      type: event.type || 'transaction',
-      blockNumber: parseInt(event.blockNumber || event.block || 0),
-      blockTimestamp: parseInt(event.timestamp || Math.floor(Date.now() / 1000)),
-      transactionHash: event.hash || event.transactionHash || '',
-      from: event.from || '',
-      to: event.to || '',
-      value: event.value || '0',
-      gasUsed: event.gasUsed || '0',
-      gasPrice: event.gasPrice || '0',
-      status: event.status || 'success'
+    const events = (data.events || []).map(event => ({
+      block: {
+        blockNumber: parseInt(event.block.blockNumber || 0),
+        blockTimestamp: parseInt(event.block.blockTimestamp || 0)
+      },
+      txnId: event.txnId || '',
+      txnIndex: parseInt(event.txnIndex || 0),
+      eventIndex: parseInt(event.eventIndex || 0),
+      maker: event.maker || '',
+      pairId: event.pairId || '',
+      eventType: event.eventType || 'swap',
+      asset0In: event.asset0In || '0',
+      asset1Out: event.asset1Out || '0',
+      reserves: {
+        asset0: event.reserves?.asset0 || '0',
+        asset1: event.reserves?.asset1 || '0'
+      }
     }));
 
     return {
       events: events,
-      total: parseInt(data.total || data.count || 0),
-      page: parseInt(data.page || 1),
-      limit: parseInt(data.limit || 100),
-      hasMore: Boolean(data.hasMore || false)
+      total: events.length,
+      fromBlock: data.fromBlock || null,
+      toBlock: data.toBlock || null
     };
   }
 }

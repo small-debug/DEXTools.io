@@ -27,7 +27,10 @@ A JavaScript API project that provides DEXTools integration methods for Qubic bl
 | `GET` | `/api/v1/exchange/:exchangeId` | Get exchange/DEX information (path param) |
 | `GET` | `/api/v1/pair?id=:id` | Get trading pair information (query param) |
 | `GET` | `/api/v1/pair/:pairId` | Get trading pair information (path param) |
-| `GET` | `/api/v1/events` | Get events with optional filters |
+| `GET` | `/api/v1/events` | Get events (swaps, transactions) in block range |
+| `GET` | `/api/v1/events/addresses/cache` | Get active addresses cache information |
+| `GET` | `/api/v1/events/cycling/stats` | Get cycling statistics |
+| `POST` | `/api/v1/events/addresses/force-refresh` | Force refresh all active addresses (ignores cache) |
 
 ### Utility Endpoints
 
@@ -139,9 +142,45 @@ curl "http://localhost:3000/api/v1/pair?id=PAIRADDRESSEXAMPLE"
 curl http://localhost:3000/api/v1/pair/PAIRADDRESSEXAMPLE
 ```
 
-### Get Events with Filters
+### Get Events in Block Range
 ```bash
-curl "http://localhost:3000/api/v1/events?page=1&limit=50&type=swap"
+# Get all events
+curl "http://localhost:3000/api/v1/events"
+
+# Get events in specific block range
+curl "http://localhost:3000/api/v1/events?fromBlock=1000&toBlock=2000"
+
+# Get events from a specific block onwards
+curl "http://localhost:3000/api/v1/events?fromBlock=5000"
+```
+
+### Get Events Collection Status
+```bash
+curl "http://localhost:3000/api/v1/events/status"
+```
+
+### Manage Active Addresses Cache
+```bash
+# Get cache information
+curl "http://localhost:3000/api/v1/events/addresses/cache"
+
+# Get fetch progress
+curl "http://localhost:3000/api/v1/events/addresses/progress"
+
+# Manually refresh cache (starts from page 1)
+curl -X POST "http://localhost:3000/api/v1/events/addresses/refresh"
+
+# Force refresh all addresses (ignores cache)
+curl -X POST "http://localhost:3000/api/v1/events/addresses/force-refresh"
+```
+
+### Monitor Cycling Process
+```bash
+# Get cycling statistics
+curl "http://localhost:3000/api/v1/events/cycling/stats"
+
+# Get events collection status
+curl "http://localhost:3000/api/v1/events/status"
 ```
 
 ## 📊 Response Format
@@ -213,23 +252,27 @@ All API responses follow the DEXTools Integration SDK specification:
 {
   "events": [
     {
-      "id": "event123",
-      "type": "swap",
-      "blockNumber": 12345,
-      "blockTimestamp": 1630000000,
-      "transactionHash": "0xabcd...",
-      "from": "0x1111...",
-      "to": "0x2222...",
-      "value": "1000000",
-      "gasUsed": "21000",
-      "gasPrice": "20000000000",
-      "status": "success"
+      "block": {
+        "blockNumber": 12345,
+        "blockTimestamp": 1630000000
+      },
+      "txnId": "txn123abc",
+      "txnIndex": 0,
+      "eventIndex": 0,
+      "maker": "ADDRESS123...",
+      "pairId": "PAIRID123...",
+      "eventType": "swap",
+      "asset0In": "1000000",
+      "asset1Out": "2000000",
+      "reserves": {
+        "asset0": "50000000",
+        "asset1": "100000000"
+      }
     }
   ],
   "total": 1000,
-  "page": 1,
-  "limit": 100,
-  "hasMore": true
+  "fromBlock": 1000,
+  "toBlock": 2000
 }
 ```
 
@@ -254,8 +297,8 @@ npm run test:qubic
 # Test response format
 npm run test:format
 
-# Test pair endpoint
-npm run test:pair
+# Test cycling functionality
+npm run test:cycling
 ```
 
 ## 📚 API Documentation

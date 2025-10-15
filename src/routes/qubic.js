@@ -212,35 +212,202 @@ router.get('/pair/:pairId', validateParams(['pairId']), async (req, res, next) =
 
 /**
  * @route GET /api/v1/events
- * @desc Get events (transactions, swaps, etc.) with optional filters
+ * @desc Get events (swaps, transactions) in a range of blocks
  * @access Public
  */
 router.get('/events', async (req, res, next) => {
   try {
-    const filters = {
-      page: req.query.page || 1,
-      limit: req.query.limit || 100,
-      type: req.query.type,
-      from: req.query.from,
-      to: req.query.to,
-      asset: req.query.asset,
-      pair: req.query.pair,
-      exchange: req.query.exchange,
-      startTime: req.query.startTime,
-      endTime: req.query.endTime
-    };
-
-    // Remove undefined values
-    Object.keys(filters).forEach(key => {
-      if (filters[key] === undefined) {
-        delete filters[key];
+    const { fromBlock, toBlock } = req.query;
+    
+    // Validate parameters
+    const filters = {};
+    
+    if (fromBlock !== undefined) {
+      const fromBlockNum = parseInt(fromBlock);
+      if (isNaN(fromBlockNum) || fromBlockNum < 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid fromBlock parameter. Must be a non-negative integer.',
+          timestamp: new Date().toISOString()
+        });
       }
-    });
+      filters.fromBlock = fromBlockNum;
+    }
+    
+    if (toBlock !== undefined) {
+      const toBlockNum = parseInt(toBlock);
+      if (isNaN(toBlockNum) || toBlockNum < 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid toBlock parameter. Must be a non-negative integer.',
+          timestamp: new Date().toISOString()
+        });
+      }
+      filters.toBlock = toBlockNum;
+    }
+    
+    // Validate block range
+    if (filters.fromBlock !== undefined && filters.toBlock !== undefined) {
+      if (filters.fromBlock > filters.toBlock) {
+        return res.status(400).json({
+          success: false,
+          error: 'fromBlock cannot be greater than toBlock.',
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
 
     const events = await qubicClient.getEvents(filters);
     
     // Return data in DEXTools format
     res.json(events);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/events/addresses/cache
+ * @desc Get active addresses cache information
+ * @access Public
+ */
+router.get('/events/addresses/cache', async (req, res, next) => {
+  try {
+    const EventsDataCollector = require('../services/eventsDataCollector');
+    const collector = new EventsDataCollector();
+    await collector.initialize();
+    
+    const cacheInfo = await collector.getAddressesCacheInfo();
+    
+    res.json({
+      success: true,
+      cache: cacheInfo,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/events/init-status
+ * @desc Get events collection initialization status
+ * @access Public
+ */
+router.get('/events/init-status', async (req, res, next) => {
+  try {
+    const EventsDataManager = require('../services/eventsDataManager');
+    const status = EventsDataManager.getInitializationStatus();
+    
+    res.json({
+      success: true,
+      data: status,
+      message: `Events collection initialization status: ${status.status}`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/events/addresses/progress
+ * @desc Get active addresses fetch progress
+ * @access Public
+ */
+router.get('/events/addresses/progress', async (req, res, next) => {
+  try {
+    const EventsDataCollector = require('../services/eventsDataCollector');
+    const collector = new EventsDataCollector();
+    await collector.initialize();
+    
+    const progress = await collector.getFetchProgress();
+    
+    res.json({
+      success: true,
+      progress: progress,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route POST /api/v1/events/addresses/force-refresh
+ * @desc Force refresh all active addresses (ignores cache)
+ * @access Public
+ */
+router.post('/events/addresses/force-refresh', async (req, res, next) => {
+  try {
+    const EventsDataCollector = require('../services/eventsDataCollector');
+    const collector = new EventsDataCollector();
+    await collector.initialize();
+    
+    const addresses = await collector.forceRefreshAllAddresses();
+    
+    res.json({
+      success: true,
+      message: `Successfully force refreshed cache with ${addresses.length} addresses`,
+      addressesCount: addresses.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route POST /api/v1/events/addresses/refresh
+ * @desc Manually refresh active addresses cache
+ * @access Public
+ */
+router.post('/events/addresses/refresh', async (req, res, next) => {
+  try {
+    const EventsDataCollector = require('../services/eventsDataCollector');
+    const collector = new EventsDataCollector();
+    await collector.initialize();
+    
+    const { resumeFromPage = 1 } = req.body;
+    
+    // Validate resumeFromPage parameter
+    if (resumeFromPage < 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'resumeFromPage must be 1 or greater',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const addresses = await collector.refreshActiveAddressesCache(resumeFromPage);
+    
+    res.json({
+      success: true,
+      message: `Successfully refreshed cache with ${addresses.length} addresses${resumeFromPage > 1 ? ` (resumed from page ${resumeFromPage})` : ''}`,
+      addressesCount: addresses.length,
+      resumedFromPage: resumeFromPage,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/events/status
+ * @desc Get events data collection status
+ * @access Public
+ */
+router.get('/events/status', async (req, res, next) => {
+  try {
+    const eventsDataManager = require('../services/eventsDataManager');
+    const status = eventsDataManager.getStatus();
+    
+    res.json({
+      success: true,
+      status: status,
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
     next(error);
   }
@@ -388,70 +555,74 @@ router.get('/docs', (req, res) => {
       {
         method: 'GET',
         path: '/events',
-        description: 'Get events with optional filters',
+        description: 'Get events (swaps, transactions) in a range of blocks',
         parameters: [
           {
-            name: 'page',
-            type: 'number',
+            name: 'fromBlock',
+            type: 'integer',
             required: false,
-            description: 'Page number (default: 1)'
+            description: 'Starting block number',
+            in: 'query'
           },
           {
-            name: 'limit',
-            type: 'number',
+            name: 'toBlock',
+            type: 'integer',
             required: false,
-            description: 'Items per page (default: 100)'
-          },
-          {
-            name: 'type',
-            type: 'string',
-            required: false,
-            description: 'Event type filter'
-          },
-          {
-            name: 'from',
-            type: 'string',
-            required: false,
-            description: 'From address filter'
-          },
-          {
-            name: 'to',
-            type: 'string',
-            required: false,
-            description: 'To address filter'
-          },
-          {
-            name: 'asset',
-            type: 'string',
-            required: false,
-            description: 'Asset filter'
-          },
-          {
-            name: 'pair',
-            type: 'string',
-            required: false,
-            description: 'Pair filter'
-          },
-          {
-            name: 'exchange',
-            type: 'string',
-            required: false,
-            description: 'Exchange filter'
-          },
-          {
-            name: 'startTime',
-            type: 'number',
-            required: false,
-            description: 'Start timestamp filter'
-          },
-          {
-            name: 'endTime',
-            type: 'number',
-            required: false,
-            description: 'End timestamp filter'
+            description: 'Ending block number',
+            in: 'query'
           }
         ],
-        example: '/api/v1/events?page=1&limit=50&type=swap'
+        example: '/api/v1/events?fromBlock=1000&toBlock=2000'
+      },
+      {
+        method: 'GET',
+        path: '/events/addresses/cache',
+        description: 'Get active addresses cache information',
+        parameters: [],
+        example: '/api/v1/events/addresses/cache'
+      },
+      {
+        method: 'GET',
+        path: '/events/cycling/stats',
+        description: 'Get cycling statistics',
+        parameters: [],
+        example: '/api/v1/events/cycling/stats'
+      },
+      {
+        method: 'GET',
+        path: '/events/init-status',
+        description: 'Get events collection initialization status',
+        parameters: [],
+        example: '/api/v1/events/init-status'
+      },
+      {
+        method: 'GET',
+        path: '/events/addresses/progress',
+        description: 'Get active addresses fetch progress',
+        parameters: [],
+        example: '/api/v1/events/addresses/progress'
+      },
+      {
+        method: 'POST',
+        path: '/events/addresses/refresh',
+        description: 'Manually refresh active addresses cache (supports resuming from specific page)',
+        parameters: [
+          {
+            name: 'resumeFromPage',
+            type: 'integer',
+            required: false,
+            description: 'Page number to resume from (default: 1)',
+            in: 'body'
+          }
+        ],
+        example: '/api/v1/events/addresses/refresh'
+      },
+      {
+        method: 'GET',
+        path: '/events/status',
+        description: 'Get events data collection status',
+        parameters: [],
+        example: '/api/v1/events/status'
       }
     ],
     responseFormat: {
