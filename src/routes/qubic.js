@@ -212,32 +212,22 @@ router.get('/pair/:pairId', validateParams(['pairId']), async (req, res, next) =
 
 /**
  * @route GET /api/v1/events
- * @desc Get events (transactions, swaps, etc.) with optional filters
+ * @desc Get events (transactions, swaps, etc.) in a range of blocks
  * @access Public
  */
 router.get('/events', async (req, res, next) => {
   try {
-    const filters = {
-      page: req.query.page || 1,
-      limit: req.query.limit || 100,
-      type: req.query.type,
-      from: req.query.from,
-      to: req.query.to,
-      asset: req.query.asset,
-      pair: req.query.pair,
-      exchange: req.query.exchange,
-      startTime: req.query.startTime,
-      endTime: req.query.endTime
-    };
+    const { fromBlock, toBlock } = req.query;
+    
+    if (!fromBlock || !toBlock) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required query parameters: fromBlock and toBlock',
+        timestamp: new Date().toISOString()
+      });
+    }
 
-    // Remove undefined values
-    Object.keys(filters).forEach(key => {
-      if (filters[key] === undefined) {
-        delete filters[key];
-      }
-    });
-
-    const events = await qubicClient.getEvents(filters);
+    const events = await qubicClient.getEventsInTickRange(parseInt(fromBlock), parseInt(toBlock));
     
     // Return data in DEXTools format
     res.json(events);
@@ -388,70 +378,24 @@ router.get('/docs', (req, res) => {
       {
         method: 'GET',
         path: '/events',
-        description: 'Get events with optional filters',
+        description: 'Get events (transactions, swaps, etc.) in a range of blocks',
         parameters: [
           {
-            name: 'page',
-            type: 'number',
-            required: false,
-            description: 'Page number (default: 1)'
+            name: 'fromBlock',
+            type: 'integer',
+            required: true,
+            description: 'Start block number (tick number)',
+            in: 'query'
           },
           {
-            name: 'limit',
-            type: 'number',
-            required: false,
-            description: 'Items per page (default: 100)'
-          },
-          {
-            name: 'type',
-            type: 'string',
-            required: false,
-            description: 'Event type filter'
-          },
-          {
-            name: 'from',
-            type: 'string',
-            required: false,
-            description: 'From address filter'
-          },
-          {
-            name: 'to',
-            type: 'string',
-            required: false,
-            description: 'To address filter'
-          },
-          {
-            name: 'asset',
-            type: 'string',
-            required: false,
-            description: 'Asset filter'
-          },
-          {
-            name: 'pair',
-            type: 'string',
-            required: false,
-            description: 'Pair filter'
-          },
-          {
-            name: 'exchange',
-            type: 'string',
-            required: false,
-            description: 'Exchange filter'
-          },
-          {
-            name: 'startTime',
-            type: 'number',
-            required: false,
-            description: 'Start timestamp filter'
-          },
-          {
-            name: 'endTime',
-            type: 'number',
-            required: false,
-            description: 'End timestamp filter'
+            name: 'toBlock',
+            type: 'integer',
+            required: true,
+            description: 'End block number (tick number)',
+            in: 'query'
           }
         ],
-        example: '/api/v1/events?page=1&limit=50&type=swap'
+        example: '/api/v1/events?fromBlock=34776300&toBlock=34776700'
       }
     ],
     responseFormat: {

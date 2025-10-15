@@ -1,4 +1,9 @@
 const axios = require('axios');
+const lib = require("@qubic-lib/qubic-ts-library")
+const { base64ToUint8Array, uint8ArrayToBase64, assetNameConvert, createDataView } = require("../utils");
+const { QubicHelper } = require("@qubic-lib/qubic-ts-library/dist/qubicHelper");
+
+const qHelper = new lib.default.QubicHelper();
 
 class QubicRpcError extends Error {
   constructor(message, status, response) {
@@ -11,7 +16,7 @@ class QubicRpcError extends Error {
 
 class QubicClient {
   constructor() {
-    this.baseURL = process.env.QUBIC_RPC_URL || 'http://localhost:8000';
+    this.baseURL = process.env.QUBIC_RPC_URL || 'https://rpc.qubic.org';
     this.timeout = parseInt(process.env.QUBIC_RPC_TIMEOUT) || 10000;
     
     this.client = axios.create({
@@ -58,7 +63,7 @@ class QubicClient {
    */
   async getLatestBlock() {
     try {
-      const response = await this.client.get('/tick-info');
+      const response = await this.client.get('/v1/tick-info');
       return this.transformLatestBlock(response.data);
     } catch (error) {
       throw new QubicRpcError(`Failed to fetch latest block: ${error.message}`, error.status);
@@ -72,7 +77,7 @@ class QubicClient {
    */
   async getBlock(identifier) {
     try {
-      const response = await this.client.get(`/ticks/${identifier}/tick-data`);
+      const response = await this.client.get(`/v1/ticks/${identifier}/tick-data`);
       return this.transformBlock(response.data, identifier);
     } catch (error) {
       throw new QubicRpcError(`Failed to fetch block ${identifier}: ${error.message}`, error.status);
@@ -89,7 +94,7 @@ class QubicClient {
       console.log(`🔍 Getting asset basic info for issuer: ${assetId}`);
       
       // Step 1: Get asset basic info (id, name, symbol) from issuances endpoint
-      const issuancesResponse = await this.client.get(`/assets/issuances?issuerIdentity=${assetId}`);
+      const issuancesResponse = await this.client.get(`/v1/assets/issuances?issuerIdentity=${assetId}`);
       const assets = issuancesResponse.data.assets || [];
       
       if (assets.length === 0) {
@@ -105,7 +110,7 @@ class QubicClient {
       
       // Step 2: Get supply and holder data from owners endpoint
       console.log(`🔍 Getting supply data for ${assetSymbol}...`);
-      const ownersResponse = await this.client.get(`/issuers/${assetId}/assets/${assetSymbol}/owners`);
+      const ownersResponse = await this.client.get(`/v1/issuers/${assetId}/assets/${assetSymbol}/owners`);
       
       // Calculate supply and holder data from owners
       const assetData = this.calculateAssetDataFromOwners(ownersResponse.data, assetId, assetSymbol, assetName);
@@ -131,7 +136,7 @@ class QubicClient {
       console.log(`🔍 Getting asset holders for issuer: ${assetId}, page: ${page}, pageSize: ${pageSize}`);
       
       // Step 1: Get asset basic info to extract token name
-      const issuancesResponse = await this.client.get(`/assets/issuances?issuerIdentity=${assetId}`);
+      const issuancesResponse = await this.client.get(`/v1/assets/issuances?issuerIdentity=${assetId}`);
       const assets = issuancesResponse.data.assets || [];
       
       if (assets.length === 0) {
@@ -146,7 +151,7 @@ class QubicClient {
       
       // Step 2: Get holders data with pagination
       console.log(`🔍 Getting holders data for ${assetSymbol}...`);
-      const ownersResponse = await this.client.get(`/issuers/${assetId}/assets/${assetSymbol}/owners?page=${page}&pageSize=${pageSize}`);
+      const ownersResponse = await this.client.get(`/v1/issuers/${assetId}/assets/${assetSymbol}/owners?page=${page}&pageSize=${pageSize}`);
       
       // Transform the data to DEXTools format
       return this.transformAssetHolders(ownersResponse.data, assetId);
@@ -189,7 +194,7 @@ class QubicClient {
       
       // If not found in hardcoded list, try to fetch from RPC (fallback)
       try {
-        const response = await this.client.get(`/exchanges/${exchangeId}`);
+        const response = await this.client.get(`/v1/exchanges/${exchangeId}`);
         return this.transformExchange(response.data);
       } catch (rpcError) {
         throw new QubicRpcError(`Exchange ${exchangeId} not found. Available exchanges: QX, QSWAP`, 404);
@@ -243,7 +248,7 @@ class QubicClient {
       
       // Step 2: Get transfer transactions from tick 0 to latest tick for this identity
       console.log(`📊 Step 2: Getting transfer transactions for identity ${pairId} from tick 0 to ${latestTick}...`);
-      const transfersResponse = await this.client.get(`/identities/${pairId}/transfer-transactions`, {
+      const transfersResponse = await this.client.get(`/v1/identities/${pairId}/transfer-transactions`, {
         params: {
           startTick: 0,
           endTick: latestTick
@@ -292,7 +297,7 @@ class QubicClient {
       
       // Step 4: Get tick data for the creation block to get timestamp
       console.log(`📊 Step 4: Getting tick data for block ${createdAtBlockNumber}...`);
-      const tickDataResponse = await this.client.get(`/ticks/${createdAtBlockNumber}/tick-data`);
+      const tickDataResponse = await this.client.get(`/v1/ticks/${createdAtBlockNumber}/tick-data`);
       const createdAtBlockTimestamp = Math.floor(parseInt(tickDataResponse.data.tickData?.timestamp || Date.now()) / 1000);
       console.log(`✅ Creation timestamp: ${createdAtBlockTimestamp}`);
       
@@ -326,10 +331,122 @@ class QubicClient {
   async getEvents(filters = {}) {
     try {
       const params = new URLSearchParams(filters);
-      const response = await this.client.get(`/events?${params}`);
+      const response = await this.client.get(`/v1/events?${params}`);
       return this.transformEvents(response.data);
     } catch (error) {
       throw new QubicRpcError(`Failed to fetch events: ${error.message}`, error.status);
+    }
+  }
+
+    async getResponseValues(res) {
+      if (!res.responseData) return null;
+      const responseView = new DataView(base64ToUint8Array(res.responseData).buffer);
+      const responseArray = base64ToUint8Array(res.responseData);
+
+      return {
+        getUint64: (offset) => Number(responseView.getBigUint64(offset, true)),
+        getUint32: (offset) => responseView.getUint32(offset, true),
+        getUint8: (offset) => responseView.getUint8(offset),
+        getID: (offset) => qHelper.getIdentity(responseArray.slice(offset, offset + 32)),
+      };
+    };
+
+    async fetchQuerySC(data) {
+      const response = await this.client.post('/v1/querySmartContract', data);
+      return response.data;
+    };
+
+    async getSumOfShares(issuer, assetName, offset) {
+      const issuerBytes = qHelper.getIdentityBytes(issuer);
+      const {view} = createDataView(48);
+      for (let i = 0; i < 32; i++) {
+        view.setUint8(i, issuerBytes[i]);
+      }
+      view.setBigUint64(32, assetNameConvert(assetName), true);  
+      view.setBigUint64(40, BigInt(offset), true);
+      console.log("view", view);
+
+      const res = await this.fetchQuerySC({
+        contractIndex: 1,
+        inputType: 2,
+        inputSize: 48,
+        requestData: uint8ArrayToBase64(new Uint8Array(view.buffer)),
+      });
+
+      const values = await this.getResponseValues(res);
+      if (!values) return null;
+
+      console.log({res, values})
+      let sum = 0;
+      for (let i = 0; i < 256; i++) {
+        sum += values.getUint64(40 + i * 48);
+      }
+      console.log("sum", sum);
+      return sum;
+    };
+
+    async getSumOfQubic(issuer, assetName, offset) {
+      const issuerBytes = qHelper.getIdentityBytes(issuer);
+      const {view} = createDataView(48);
+      for (let i = 0; i < 32; i++) {
+        view.setUint8(i, issuerBytes[i]);
+      }
+      view.setBigUint64(32, assetNameConvert(assetName), true);  
+      view.setBigUint64(40, BigInt(offset), true);
+
+      console.log("view", view);
+      const res = await this.fetchQuerySC({
+        contractIndex: 1,
+        inputType: 3,
+        inputSize: 48,
+        requestData: uint8ArrayToBase64(new Uint8Array(view.buffer)),
+      });
+
+      const values = await this.getResponseValues(res);
+      if (!values) return null;
+
+      let sum = 0;
+      for (let i = 0; i < 256; i++) {
+        sum += values.getUint64(40 + i * 48) * values.getUint64(32 + i * 48);
+      }
+      console.log("sum", sum);
+      return sum;
+    };
+
+  /**
+   * Get events in a tick range using Qubic RPC API
+   * @param {number} fromBlock - Start tick number
+   * @param {number} toBlock - End tick number
+   * @returns {Promise<Object>} Events data in DEXTools format
+   */
+  async getEventsInTickRange(fromBlock, toBlock) {
+    try {
+      console.log(`🔍 Getting events from tick ${fromBlock} to ${toBlock}`);
+      
+      // Use the QX address as the identity to get transfers
+      const QX_ADDRESS = 'BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID';
+      
+      // Fetch transfers using the Qubic RPC API v2
+      const response = await this.client.get(`/v2/identities/${QX_ADDRESS}/transfers`, {
+        params: {
+          startTick: fromBlock,
+          endTick: toBlock
+        }
+      });
+      
+      const data = response.data;
+      const transactions = data.transactions || [];
+      
+      console.log(`✅ Found ${transactions.length} transactions in tick range`);
+      
+      // Transform transactions to events format
+      const events = await this.transformTransactionsToEvents(transactions);
+      
+      return {
+        events: events
+      };
+    } catch (error) {
+      throw new QubicRpcError(`Failed to fetch events in tick range ${fromBlock}-${toBlock}: ${error.message}`, error.status);
     }
   }
 
@@ -489,6 +606,215 @@ class QubicClient {
         factoryAddress: data.factoryAddress || ''
       }
     };
+  }
+
+  /**
+   * Transform transactions to events format for DEXTools
+   * @param {Array} transactions - Array of transaction data from Qubic RPC
+   * @returns {Array} Transformed events in DEXTools format
+   */
+  async transformTransactionsToEvents(transactions) {
+    const events = [];
+    let eventIndex = 0;
+
+    for (const tickData of transactions) {
+      const tickNumber = tickData.tickNumber;
+      const tickTransactions = tickData.transactions || [];
+
+      for (let txnIndex = 0; txnIndex < tickTransactions.length; txnIndex++) {
+        const txData = tickTransactions[txnIndex];
+        const transaction = txData.transaction;
+        const timestamp = txData.timestamp;
+
+        // Parse inputHex to extract pairId and asset1Out
+        const parsedInput = await this.parseInputHex(transaction.inputHex, transaction.inputType);
+
+        if (parsedInput.pairId === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB" || transaction.amount <= 100) {
+          continue;
+        }
+
+        // Fetch the asset name of the pairId from the Qubic RPC response body
+        const assetResponse = await this.client.get(`/v1/assets/${parsedInput.pairId}/issued`);
+        const assetName = assetResponse.data?.issuedAssets?.[0]?.data?.name || "";
+        const sumOfShares = await this.getSumOfShares(parsedInput.pairId, assetName, 0);
+        const sumOfQubic = await this.getSumOfQubic(parsedInput.pairId, assetName, 0);
+
+        // Create event object
+        const event = {
+          block: {
+            blockNumber: parseInt(tickNumber),
+            blockTimestamp: Math.floor(parseInt(timestamp) / 1000) // Convert to seconds
+          },
+          txnId: transaction.txId,
+          txnIndex: txnIndex,
+          eventIndex: eventIndex++,
+          maker: transaction.sourceId,
+          pairId: parsedInput.pairId || transaction.destId, // Use destId as fallback
+          eventType: "swap",
+          asset0In: transaction.amount,
+          asset1Out: parsedInput.asset1Out || "0",
+          reserves: {
+            asset0: sumOfQubic, // Will be implemented later as per user request
+            asset1: sumOfShares  // Will be implemented later as per user request
+          }
+        };
+
+        events.push(event);
+      }
+    }
+
+    return events;
+  }
+
+  /**
+   * Parse inputHex to extract pairId and asset1Out based on Qubic transaction structure
+   * @param {string} inputHex - Hex string from transaction input
+   * @param {number} inputType - Input type from transaction
+   * @returns {Object} Parsed data containing pairId and asset1Out
+   */
+  async parseInputHex(inputHex, inputType) {
+    try {
+      if (!inputHex || inputHex.length < 16) {
+        return { pairId: null, asset1Out: "0" };
+      }
+
+      // Convert hex to buffer for easier parsing
+      const buffer = Buffer.from(inputHex, 'hex');
+      
+      console.log(`🔍 Parsing inputHex (type ${inputType}): ${inputHex}`);
+      
+      // Based on Qubic transaction structure and inputType
+      let pairId = null;
+      let asset1Out = "0";
+      
+      switch (inputType) {
+        case 5: // AddToAskOrder transaction
+          if (buffer.length >= 40) {
+            const pairIdBytes = buffer.slice(0, 32);
+            pairId = await this.bytesToQubicAddress(pairIdBytes);
+            
+            const amountBytes = buffer.slice(48, 56);
+            asset1Out = this.bytesToBigInt(amountBytes).toString();
+          }
+          break;
+          
+        case 6: // AddToBidOrder transaction
+          if (buffer.length >= 40) {
+            const pairIdBytes = buffer.slice(0, 32);
+            pairId = await this.bytesToQubicAddress(pairIdBytes);
+            
+            const amountBytes = buffer.slice(48, 56);
+            asset1Out = this.bytesToBigInt(amountBytes).toString();
+          }
+          break;
+          
+        case 7: // RemoveFromAskOrder transaction
+          if (buffer.length >= 32) {
+            const pairIdBytes = buffer.slice(0, 32);
+            pairId = await this.bytesToQubicAddress(pairIdBytes);
+
+            const amountBytes = buffer.slice(48, 56);
+            asset1Out = this.bytesToBigInt(amountBytes).toString();
+          }
+          break;
+          
+        case 8: // DRAW/CAP transaction
+          // For DRAW/CAP: first 32 bytes contain pairId, next 8 bytes contain amount
+          if (buffer.length >= 40) {
+            const pairIdBytes = buffer.slice(0, 32);
+            pairId = await this.bytesToQubicAddress(pairIdBytes);
+            
+            const amountBytes = buffer.slice(48, 56);
+            asset1Out = this.bytesToBigInt(amountBytes).toString();
+          }
+          break;
+          
+        default:
+          // For unknown types, try to extract from first 32 bytes
+          if (buffer.length >= 32) {
+            const pairIdBytes = buffer.slice(0, 32);
+            pairId = await this.bytesToQubicAddress(pairIdBytes);
+          }
+          break;
+      }
+      
+      console.log(`🔍 Parsed (type ${inputType}) - pairId: ${pairId}, asset1Out: ${asset1Out}`);
+      
+      return {
+        pairId: pairId,
+        asset1Out: asset1Out
+      };
+    } catch (error) {
+      console.error('❌ Error parsing inputHex:', error);
+      return { pairId: null, asset1Out: "0" };
+    }
+  }
+
+  /**
+   * Convert bytes to Qubic address format
+   * @param {Buffer} bytes - Buffer containing address bytes
+   * @returns {string} Qubic address string
+   */
+  async bytesToQubicAddress(bytes) {
+    // try {
+    //   if (!bytes || bytes.length === 0) {
+    //     return null;
+    //   }
+
+    //   // Qubic addresses are 60 characters long and use a specific base32 encoding
+    //   // The encoding uses the alphabet: ABCDEFGHIJKLMNOPQRSTUVWXYZ234567
+    //   const base32Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    //   let result = '';
+      
+    //   // Convert bytes to base32
+    //   let value = 0;
+    //   let bits = 0;
+      
+    //   for (let i = 0; i < bytes.length; i++) {
+    //     value = (value << 8) | bytes[i];
+    //     bits += 8;
+        
+    //     while (bits >= 5) {
+    //       result += base32Chars[(value >> (bits - 5)) & 31];
+    //       bits -= 5;
+    //     }
+    //   }
+      
+    //   if (bits > 0) {
+    //     result += base32Chars[(value << (5 - bits)) & 31];
+    //   }
+      
+    //   // Pad to 60 characters (Qubic address length)
+    //   while (result.length < 60) {
+    //     result += 'A';
+    //   }
+      
+    //   return result.substring(0, 60);
+    // } catch (error) {
+    //   console.error('❌ Error converting bytes to Qubic address:', error);
+    //   return null;
+    // }
+    const id = await qHelper.getIdentity(bytes);
+    return id;
+  }
+
+  /**
+   * Convert bytes to BigInt
+   * @param {Buffer} bytes - Buffer containing numeric data
+   * @returns {BigInt} BigInt value
+   */
+  bytesToBigInt(bytes) {
+    try {
+      let result = BigInt(0);
+      // Little-endian: least significant byte first
+      for (let i = 0; i < bytes.length; i++) {
+        result += BigInt(bytes[i]) << (BigInt(8) * BigInt(i));
+      }
+      return result;
+    } catch (error) {
+      console.error('❌ Error converting bytes to BigInt:', error);
+      return BigInt(0);
+    }
   }
 
   /**
