@@ -242,7 +242,7 @@ class QubicClient {
       
       // Step 1: Get latest tick
       console.log(`📊 Step 1: Getting latest tick...`);
-      const latestTickResponse = await this.client.get('/tick-info');
+      const latestTickResponse = await this.client.get('/v1/tick-info');
       const latestTick = latestTickResponse.data.tickInfo?.tick || latestTickResponse.data.tick || 0;
       console.log(`✅ Latest tick: ${latestTick}`);
       
