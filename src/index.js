@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const qubicRoutes = require('./routes/qubic');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
+const requestLogger = require('./middleware/requestLogger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +19,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(morgan('combined'));
+app.use(requestLogger); // Custom request logger for blockchain endpoints
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

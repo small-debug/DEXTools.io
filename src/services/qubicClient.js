@@ -2,6 +2,7 @@ const axios = require('axios');
 const lib = require("@qubic-lib/qubic-ts-library")
 const { base64ToUint8Array, uint8ArrayToBase64, assetNameConvert, createDataView } = require("../utils");
 const { QubicHelper } = require("@qubic-lib/qubic-ts-library/dist/qubicHelper");
+const CacheService = require('./cacheService');
 
 const qHelper = new lib.default.QubicHelper();
 
@@ -18,6 +19,7 @@ class QubicClient {
   constructor() {
     this.baseURL = process.env.QUBIC_RPC_URL || 'https://rpc.qubic.org';
     this.timeout = parseInt(process.env.QUBIC_RPC_TIMEOUT) || 10000;
+    this.cache = new CacheService();
     
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -63,8 +65,21 @@ class QubicClient {
    */
   async getLatestBlock() {
     try {
+      // Check cache first
+      const cached = this.cache.getCachedLatestBlock();
+      if (cached) {
+        console.log('📦 Using cached latest block');
+        return cached;
+      }
+
+      console.log('🔍 Fetching latest block from RPC...');
       const response = await this.client.get('/v1/tick-info');
-      return this.transformLatestBlock(response.data);
+      const blockData = this.transformLatestBlock(response.data);
+      
+      // Cache the result
+      this.cache.cacheLatestBlock(blockData);
+      
+      return blockData;
     } catch (error) {
       throw new QubicRpcError(`Failed to fetch latest block: ${error.message}`, error.status);
     }
@@ -423,6 +438,14 @@ class QubicClient {
     try {
       console.log(`🔍 Getting events from tick ${fromBlock} to ${toBlock}`);
       
+      // Check if this range is known to be empty
+      if (this.cache.isEmptyRange(fromBlock, toBlock)) {
+        console.log('📦 Using cached empty range - returning empty events');
+        return {
+          events: []
+        };
+      }
+      
       // Use the QX address as the identity to get transfers
       const QX_ADDRESS = 'BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID';
       
@@ -438,6 +461,15 @@ class QubicClient {
       const transactions = data.transactions || [];
       
       console.log(`✅ Found ${transactions.length} transactions in tick range`);
+      
+      // If no transactions, cache this as an empty range for fast future responses
+      if (transactions.length === 0) {
+        this.cache.cacheEmptyRange(fromBlock, toBlock);
+        console.log('📦 Cached empty range for future requests');
+        return {
+          events: []
+        };
+      }
       
       // Transform transactions to events format
       const events = await this.transformTransactionsToEvents(transactions);

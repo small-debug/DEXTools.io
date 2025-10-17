@@ -1,6 +1,7 @@
 const express = require('express');
 const { QubicClient } = require('../services/qubicClient');
 const { validateParams, validateQuery } = require('../middleware/validation');
+const { blockchainRateLimit, generalRateLimit } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 const qubicClient = new QubicClient();
@@ -10,7 +11,7 @@ const qubicClient = new QubicClient();
  * @desc Get the latest block information
  * @access Public
  */
-router.get('/latest-block', async (req, res, next) => {
+router.get('/latest-block', blockchainRateLimit, async (req, res, next) => {
   try {
     const latestBlock = await qubicClient.getLatestBlock();
     
@@ -215,7 +216,7 @@ router.get('/pair/:pairId', validateParams(['pairId']), async (req, res, next) =
  * @desc Get events (transactions, swaps, etc.) in a range of blocks
  * @access Public
  */
-router.get('/events', async (req, res, next) => {
+router.get('/events', blockchainRateLimit, async (req, res, next) => {
   try {
     const { fromBlock, toBlock } = req.query;
     
@@ -233,6 +234,50 @@ router.get('/events', async (req, res, next) => {
     res.json(events);
   } catch (error) {
     next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/cache-stats
+ * @desc Get cache statistics for monitoring
+ * @access Public
+ */
+router.get('/cache-stats', generalRateLimit, (req, res) => {
+  try {
+    const stats = qubicClient.cache.getStats();
+    res.json({
+      success: true,
+      data: stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get cache statistics',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * @route POST /api/v1/clear-cache
+ * @desc Clear all caches (for maintenance)
+ * @access Public
+ */
+router.post('/clear-cache', generalRateLimit, (req, res) => {
+  try {
+    qubicClient.cache.clearCache();
+    res.json({
+      success: true,
+      message: 'Cache cleared successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear cache',
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
