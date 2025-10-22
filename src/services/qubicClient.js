@@ -21,6 +21,26 @@ class QubicClient {
     this.timeout = parseInt(process.env.QUBIC_RPC_TIMEOUT) || 10000;
     this.cache = new CacheService();
     
+    // Rate limiting configuration
+    this.rateLimitConfig = {
+      maxRequestsPerSecond: parseInt(process.env.QUBIC_RPC_RATE_LIMIT) || 10, // Max 10 requests per second
+      maxRetries: parseInt(process.env.QUBIC_RPC_MAX_RETRIES) || 3,
+      retryDelay: parseInt(process.env.QUBIC_RPC_RETRY_DELAY) || 1000, // Base delay in ms
+      circuitBreakerThreshold: parseInt(process.env.QUBIC_RPC_CIRCUIT_THRESHOLD) || 5, // Failures before circuit opens
+      circuitBreakerTimeout: parseInt(process.env.QUBIC_RPC_CIRCUIT_TIMEOUT) || 30000 // Circuit timeout in ms
+    };
+    
+    // Rate limiting state
+    this.requestQueue = [];
+    this.lastRequestTime = 0;
+    this.requestCount = 0;
+    this.requestWindowStart = Date.now();
+    
+    // Circuit breaker state
+    this.circuitBreakerState = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+    this.failureCount = 0;
+    this.lastFailureTime = 0;
+    
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: this.timeout,
@@ -50,6 +70,17 @@ class QubicClient {
       },
       (error) => {
         console.error('❌ Qubic RPC Response Error:', error.response?.status, error.message);
+        
+        // Handle 429 (Too Many Requests) specifically
+        if (error.response?.status === 429) {
+          console.log('🚨 Rate limit hit from external API');
+          throw new QubicRpcError(
+            'Too many requests to external API',
+            429,
+            error.response?.data
+          );
+        }
+        
         throw new QubicRpcError(
           error.response?.data?.message || error.message,
           error.response?.status || 500,
@@ -57,6 +88,113 @@ class QubicClient {
         );
       }
     );
+  }
+
+  /**
+   * Check if circuit breaker is open
+   * @returns {boolean} True if circuit breaker is open
+   */
+  isCircuitBreakerOpen() {
+    if (this.circuitBreakerState === 'OPEN') {
+      const timeSinceLastFailure = Date.now() - this.lastFailureTime;
+      if (timeSinceLastFailure > this.rateLimitConfig.circuitBreakerTimeout) {
+        this.circuitBreakerState = 'HALF_OPEN';
+        console.log('🔄 Circuit breaker moved to HALF_OPEN state');
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Record a successful request for circuit breaker
+   */
+  recordSuccess() {
+    this.failureCount = 0;
+    if (this.circuitBreakerState === 'HALF_OPEN') {
+      this.circuitBreakerState = 'CLOSED';
+      console.log('✅ Circuit breaker moved to CLOSED state');
+    }
+  }
+
+  /**
+   * Record a failed request for circuit breaker
+   */
+  recordFailure() {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+    
+    if (this.failureCount >= this.rateLimitConfig.circuitBreakerThreshold) {
+      this.circuitBreakerState = 'OPEN';
+      console.log(`🚨 Circuit breaker opened due to ${this.failureCount} consecutive failures`);
+    }
+  }
+
+  /**
+   * Wait for rate limit window to reset
+   * @returns {Promise<void>}
+   */
+  async waitForRateLimit() {
+    const now = Date.now();
+    const timeSinceWindowStart = now - this.requestWindowStart;
+    
+    // Reset window if more than 1 second has passed
+    if (timeSinceWindowStart >= 1000) {
+      this.requestCount = 0;
+      this.requestWindowStart = now;
+    }
+    
+    // If we've hit the rate limit, wait until the window resets
+    if (this.requestCount >= this.rateLimitConfig.maxRequestsPerSecond) {
+      const waitTime = 1000 - timeSinceWindowStart;
+      if (waitTime > 0) {
+        console.log(`⏳ Rate limit reached, waiting ${waitTime}ms`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        this.requestCount = 0;
+        this.requestWindowStart = Date.now();
+      }
+    }
+  }
+
+  /**
+   * Make a rate-limited request with retry logic
+   * @param {Function} requestFn - Function that makes the actual request
+   * @param {number} retryCount - Current retry count
+   * @returns {Promise<any>} Request response
+   */
+  async makeRateLimitedRequest(requestFn, retryCount = 0) {
+    // Check circuit breaker
+    if (this.isCircuitBreakerOpen()) {
+      throw new QubicRpcError('Circuit breaker is open - too many failures', 503);
+    }
+
+    // Wait for rate limit
+    await this.waitForRateLimit();
+
+    try {
+      this.requestCount++;
+      const result = await requestFn();
+      this.recordSuccess();
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      
+      // Handle 429 (Too Many Requests) with exponential backoff
+      if (error.response?.status === 429 || error.status === 429) {
+        if (retryCount < this.rateLimitConfig.maxRetries) {
+          const delay = this.rateLimitConfig.retryDelay * Math.pow(2, retryCount);
+          console.log(`🔄 Rate limited, retrying in ${delay}ms (attempt ${retryCount + 1}/${this.rateLimitConfig.maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return this.makeRateLimitedRequest(requestFn, retryCount + 1);
+        } else {
+          throw new QubicRpcError('Rate limit exceeded after retries', 429);
+        }
+      }
+      
+      // Handle other errors
+      throw error;
+    }
   }
 
   /**
@@ -73,7 +211,9 @@ class QubicClient {
       }
 
       console.log('🔍 Fetching latest block from RPC...');
-      const response = await this.client.get('/v1/tick-info');
+      const response = await this.makeRateLimitedRequest(() => 
+        this.client.get('/v1/tick-info')
+      );
       const blockData = this.transformLatestBlock(response.data);
       
       // Cache the result
@@ -367,7 +507,9 @@ class QubicClient {
     };
 
     async fetchQuerySC(data) {
-      const response = await this.client.post('/v1/querySmartContract', data);
+      const response = await this.makeRateLimitedRequest(() => 
+        this.client.post('/v1/querySmartContract', data)
+      );
       return response.data;
     };
 
@@ -449,13 +591,15 @@ class QubicClient {
       // Use the QX address as the identity to get transfers
       const QX_ADDRESS = 'BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARMID';
       
-      // Fetch transfers using the Qubic RPC API v2
-      const response = await this.client.get(`/v2/identities/${QX_ADDRESS}/transfers`, {
-        params: {
-          startTick: fromBlock,
-          endTick: toBlock
-        }
-      });
+      // Fetch transfers using the Qubic RPC API v2 with rate limiting
+      const response = await this.makeRateLimitedRequest(() => 
+        this.client.get(`/v2/identities/${QX_ADDRESS}/transfers`, {
+          params: {
+            startTick: fromBlock,
+            endTick: toBlock
+          }
+        })
+      );
       
       const data = response.data;
       const transactions = data.transactions || [];
@@ -666,7 +810,9 @@ class QubicClient {
         }
 
         // Fetch the asset name of the pairId from the Qubic RPC response body
-        const assetResponse = await this.client.get(`/v1/assets/${parsedInput.pairId}/issued`);
+        const assetResponse = await this.makeRateLimitedRequest(() => 
+          this.client.get(`/v1/assets/${parsedInput.pairId}/issued`)
+        );
         const assetName = assetResponse.data?.issuedAssets?.[0]?.data?.name || "";
         const sumOfShares = await this.getSumOfShares(parsedInput.pairId, assetName, 0);
         const sumOfQubic = await this.getSumOfQubic(parsedInput.pairId, assetName, 0);
