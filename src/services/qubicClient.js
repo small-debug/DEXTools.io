@@ -1,4 +1,6 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const lib = require("@qubic-lib/qubic-ts-library")
 const { base64ToUint8Array, uint8ArrayToBase64, assetNameConvert, createDataView } = require("../utils");
 const { QubicHelper } = require("@qubic-lib/qubic-ts-library/dist/qubicHelper");
@@ -20,6 +22,8 @@ class QubicClient {
     this.baseURL = process.env.QUBIC_RPC_URL || 'https://rpc.qubic.org';
     this.timeout = parseInt(process.env.QUBIC_RPC_TIMEOUT) || 10000;
     this.cache = new CacheService();
+    this.priceDataFile = path.join(__dirname, '..', 'data', 'price-data.json');
+    this.assetsDataFile = path.join(__dirname, '..', 'data', 'assets-data.json');
     
     // Rate limiting configuration
     this.rateLimitConfig = {
@@ -571,6 +575,198 @@ class QubicClient {
     };
 
   /**
+   * Fetch assets data from QX API
+   * @returns {Promise<Array>} Array of assets
+   */
+  async fetchAssetsData() {
+    try {
+      console.log('🔍 Fetching assets data from QX API...');
+      const response = await this.makeRateLimitedRequest(() => 
+        axios.get('https://qxinfo.qubic.org/api/v1/qx/assets')
+      );
+      
+      // Save to file
+      const dataDir = path.dirname(this.assetsDataFile);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      fs.writeFileSync(this.assetsDataFile, JSON.stringify(response.data, null, 2));
+      
+      console.log(`✅ Found ${response.data.length} assets and saved to file`);
+      return response.data;
+    } catch (error) {
+      console.error('❌ Failed to fetch assets data:', error.message);
+      
+      // Try to read from file if API fails
+      if (fs.existsSync(this.assetsDataFile)) {
+        console.log('📦 Using cached assets data from file');
+        return JSON.parse(fs.readFileSync(this.assetsDataFile, 'utf8'));
+      }
+      
+      throw new QubicRpcError(`Failed to fetch assets data: ${error.message}`, error.status);
+    }
+  }
+
+  /**
+   * Get asset name for a given issuer (pairId)
+   * @param {string} issuer - Asset issuer
+   * @returns {Promise<string>} Asset name
+   */
+  async getAssetNameForIssuer(issuer) {
+    try {
+      const assets = await this.fetchAssetsData();
+      const asset = assets.find(a => a.issuer === issuer);
+      return asset ? asset.name : '';
+    } catch (error) {
+      console.error('❌ Failed to get asset name:', error.message);
+      return '';
+    }
+  }
+
+  /**
+   * Fetch price chart data for an asset and save to file
+   * @param {string} issuer - Asset issuer
+   * @param {string} assetName - Asset name
+   * @returns {Promise<void>}
+   */
+  async fetchAndSavePriceData(issuer, assetName) {
+    try {
+      console.log(`🔍 Fetching price chart data for ${assetName}...`);
+      const response = await this.makeRateLimitedRequest(() => 
+        axios.get(`https://qxinfo.qubic.org/api/v1/qx/issuer/${issuer}/asset/${assetName}/chart/average-price`)
+      );
+      
+      const priceData = {
+        issuer,
+        assetName,
+        lastUpdated: new Date().toISOString(),
+        data: response.data
+      };
+      
+      // Load existing price data
+      let allPriceData = {};
+      if (fs.existsSync(this.priceDataFile)) {
+        allPriceData = JSON.parse(fs.readFileSync(this.priceDataFile, 'utf8'));
+      }
+      
+      // Update price data for this asset
+      allPriceData[issuer] = priceData;
+      
+      // Save to file
+      const dataDir = path.dirname(this.priceDataFile);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      fs.writeFileSync(this.priceDataFile, JSON.stringify(allPriceData, null, 2));
+      
+      console.log(`✅ Saved price data for ${assetName}`);
+    } catch (error) {
+      console.error(`❌ Failed to fetch price data for ${assetName}:`, error.message);
+    }
+  }
+
+  /**
+   * Update all price data (called every 3 days)
+   * @returns {Promise<void>}
+   */
+  async updateAllPriceData() {
+    try {
+      console.log('🔄 Updating all price data...');
+      const assets = await this.fetchAssetsData();
+      
+      for (const asset of assets) {
+        await this.fetchAndSavePriceData(asset.issuer, asset.name);
+        // Small delay to respect rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      console.log('✅ All price data updated successfully');
+    } catch (error) {
+      console.error('❌ Failed to update all price data:', error.message);
+    }
+  }
+
+  /**
+   * Get reserves for a specific timestamp
+   * @param {string} issuer - Asset issuer (pairId)
+   * @param {number} timestamp - Event timestamp in seconds
+   * @returns {Promise<Object>} Reserves {asset0, asset1}
+   */
+  async getReservesForTimestamp(issuer, timestamp) {
+    try {
+      // Load price data from file
+      if (!fs.existsSync(this.priceDataFile)) {
+        console.log('📦 No price data file found, returning zero reserves');
+        return { asset0: "0", asset1: "0" };
+      }
+      
+      const allPriceData = JSON.parse(fs.readFileSync(this.priceDataFile, 'utf8'));
+      const assetPriceData = allPriceData[issuer];
+      
+      if (!assetPriceData || !assetPriceData.data) {
+        console.log(`📦 No price data found for issuer ${issuer}`);
+        return { asset0: "0", asset1: "0" };
+      }
+      
+      // Convert timestamp to date string (YYYY-MM-DD)
+      const date = new Date(timestamp * 1000);
+      const dateString = date.toISOString().split('T')[0];
+      
+      // Find the latest price data entry on or before the provided date
+      const priceEntry = assetPriceData.data
+        .filter(p => p.time <= dateString)
+        .sort((a, b) => b.time.localeCompare(a.time))[0];
+      
+      if (!priceEntry) {
+        console.log(`📦 No price data found for date ${dateString}`);
+        return { asset0: "0", asset1: "0" };
+      }
+      
+      return {
+        asset0: priceEntry.totalAmount.toString(),
+        asset1: priceEntry.totalShares.toString()
+      };
+    } catch (error) {
+      console.error('❌ Failed to get reserves:', error.message);
+      return { asset0: "0", asset1: "0" };
+    }
+  }
+
+  /**
+   * Check if price data needs updating (every 3 days)
+   * @returns {boolean}
+   */
+  shouldUpdatePriceData() {
+    try {
+      if (!fs.existsSync(this.priceDataFile)) {
+        return true;
+      }
+      
+      const allPriceData = JSON.parse(fs.readFileSync(this.priceDataFile, 'utf8'));
+      
+      // Check if any asset data exists
+      if (!allPriceData || Object.keys(allPriceData).length === 0) {
+        return true;
+      }
+      
+      // Check the last updated time of the first asset
+      const firstAsset = Object.values(allPriceData)[0];
+      if (!firstAsset || !firstAsset.lastUpdated) {
+        return true;
+      }
+      
+      const lastUpdated = new Date(firstAsset.lastUpdated);
+      const now = new Date();
+      const daysSinceUpdate = (now - lastUpdated) / (1000 * 60 * 60 * 24);
+      
+      return daysSinceUpdate >= 3;
+    } catch (error) {
+      console.error('❌ Error checking price data update:', error.message);
+      return true;
+    }
+  }
+
+  /**
    * Get events in a tick range using Qubic RPC API
    * @param {number} fromBlock - Start tick number
    * @param {number} toBlock - End tick number
@@ -579,6 +775,15 @@ class QubicClient {
   async getEventsInTickRange(fromBlock, toBlock) {
     try {
       console.log(`🔍 Getting events from tick ${fromBlock} to ${toBlock}`);
+      
+      // Check if price data needs updating (every 3 days)
+      if (this.shouldUpdatePriceData()) {
+        console.log('🔄 Price data is outdated or missing, updating...');
+        // Update in background, don't wait
+        this.updateAllPriceData().catch(err => 
+          console.error('❌ Background price data update failed:', err.message)
+        );
+      }
       
       // Check if this range is known to be empty
       if (this.cache.isEmptyRange(fromBlock, toBlock)) {
@@ -809,13 +1014,8 @@ class QubicClient {
           continue;
         }
 
-        // Fetch the asset name of the pairId from the Qubic RPC response body
-        const assetResponse = await this.makeRateLimitedRequest(() => 
-          this.client.get(`/v1/assets/${parsedInput.pairId}/issued`)
-        );
-        const assetName = assetResponse.data?.issuedAssets?.[0]?.data?.name || "";
-        const sumOfShares = await this.getSumOfShares(parsedInput.pairId, assetName, 0);
-        const sumOfQubic = await this.getSumOfQubic(parsedInput.pairId, assetName, 0);
+        // Get reserves from price data based on timestamp
+        const reserves = await this.getReservesForTimestamp(parsedInput.pairId, Math.floor(parseInt(timestamp) / 1000));
 
         if (transaction.inputType == 5)
         {
@@ -834,8 +1034,8 @@ class QubicClient {
             asset0Out: parsedInput.asset0In || "0",
             asset1In: parsedInput.asset1Out || "0",
             reserves: {
-              asset0: sumOfQubic, // Will be implemented later as per user request
-              asset1: sumOfShares  // Will be implemented later as per user request
+              asset0: reserves.asset0,
+              asset1: reserves.asset1
             }
           };
           events.push(event);
@@ -857,8 +1057,8 @@ class QubicClient {
             asset0In: parsedInput.asset0Out || "0",
             asset1Out: parsedInput.asset1In || "0",
             reserves: {
-              asset0: sumOfQubic, // Will be implemented later as per user request
-              asset1: sumOfShares  // Will be implemented later as per user request
+              asset0: reserves.asset0,
+              asset1: reserves.asset1
             }
           };
           events.push(event);
