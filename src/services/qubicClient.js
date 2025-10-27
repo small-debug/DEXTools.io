@@ -805,7 +805,7 @@ class QubicClient {
         // Parse inputHex to extract pairId and asset1Out
         const parsedInput = await this.parseInputHex(transaction.inputHex, transaction.inputType);
 
-        if (parsedInput.pairId === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB" || transaction.amount <= 100) {
+        if (parsedInput.pairId === "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFXIB" || (transaction.inputType != 5 && transaction.inputType != 6)) {
           continue;
         }
 
@@ -817,27 +817,52 @@ class QubicClient {
         const sumOfShares = await this.getSumOfShares(parsedInput.pairId, assetName, 0);
         const sumOfQubic = await this.getSumOfQubic(parsedInput.pairId, assetName, 0);
 
-        // Create event object
-        const event = {
-          block: {
-            blockNumber: parseInt(tickNumber),
-            blockTimestamp: Math.floor(parseInt(timestamp) / 1000) // Convert to seconds
-          },
-          txnId: transaction.txId,
-          txnIndex: txnIndex,
-          eventIndex: eventIndex++,
-          maker: transaction.sourceId,
-          pairId: parsedInput.pairId || transaction.destId, // Use destId as fallback
-          eventType: "swap",
-          asset0In: transaction.amount,
-          asset1Out: parsedInput.asset1Out || "0",
-          reserves: {
-            asset0: sumOfQubic, // Will be implemented later as per user request
-            asset1: sumOfShares  // Will be implemented later as per user request
-          }
-        };
-
-        events.push(event);
+        if (transaction.inputType == 5)
+        {
+          // Create event object
+          const event = {
+            block: {
+              blockNumber: parseInt(tickNumber),
+              blockTimestamp: Math.floor(parseInt(timestamp) / 1000) // Convert to seconds
+            },
+            txnId: transaction.txId,
+            txnIndex: txnIndex,
+            eventIndex: eventIndex++,
+            maker: transaction.sourceId,
+            pairId: parsedInput.pairId || transaction.destId, // Use destId as fallback
+            eventType: "swap",
+            asset0Out: parsedInput.asset0In || "0",
+            asset1In: parsedInput.asset1Out || "0",
+            reserves: {
+              asset0: sumOfQubic, // Will be implemented later as per user request
+              asset1: sumOfShares  // Will be implemented later as per user request
+            }
+          };
+          events.push(event);
+        }
+        else
+        {
+          // Create event object
+          const event = {
+            block: {
+              blockNumber: parseInt(tickNumber),
+              blockTimestamp: Math.floor(parseInt(timestamp) / 1000) // Convert to seconds
+            },
+            txnId: transaction.txId,
+            txnIndex: txnIndex,
+            eventIndex: eventIndex++,
+            maker: transaction.sourceId,
+            pairId: parsedInput.pairId || transaction.destId, // Use destId as fallback
+            eventType: "swap",
+            asset0In: parsedInput.asset0Out || "0",
+            asset1Out: parsedInput.asset1In || "0",
+            reserves: {
+              asset0: sumOfQubic, // Will be implemented later as per user request
+              asset1: sumOfShares  // Will be implemented later as per user request
+            }
+          };
+          events.push(event);
+        }
       }
     }
 
@@ -864,6 +889,9 @@ class QubicClient {
       // Based on Qubic transaction structure and inputType
       let pairId = null;
       let asset1Out = "0";
+      let asset0In = "0";
+      let asset1In = "0";
+      let asset0Out = "0";
       
       switch (inputType) {
         case 5: // AddToAskOrder transaction
@@ -871,8 +899,13 @@ class QubicClient {
             const pairIdBytes = buffer.slice(0, 32);
             pairId = await this.bytesToQubicAddress(pairIdBytes);
             
-            const amountBytes = buffer.slice(48, 56);
-            asset1Out = this.bytesToBigInt(amountBytes).toString();
+            const amountBytesForAsset1Out = buffer.slice(48, 56);
+            // To perform multiplication, convert both to BigInt types first to avoid type issues
+            const asset1OutBigInt = this.bytesToBigInt(amountBytesForAsset1Out);
+            const asset0InBigInt = this.bytesToBigInt(buffer.slice(40, 48));
+            const multipliedValue = asset0InBigInt * asset1OutBigInt;
+            asset0In = multipliedValue.toString();
+            asset1Out = asset1OutBigInt.toString();
           }
           break;
           
@@ -881,8 +914,13 @@ class QubicClient {
             const pairIdBytes = buffer.slice(0, 32);
             pairId = await this.bytesToQubicAddress(pairIdBytes);
             
-            const amountBytes = buffer.slice(48, 56);
-            asset1Out = this.bytesToBigInt(amountBytes).toString();
+            const amountBytesForAsset1In = buffer.slice(48, 56);
+            // To perform multiplication, convert both to BigInt types first to avoid type issues
+            const asset1InBigInt = this.bytesToBigInt(amountBytesForAsset1In);
+            const asset0OutBigInt = this.bytesToBigInt(buffer.slice(40, 48));
+            const multipliedValue = asset0OutBigInt * asset1InBigInt;
+            asset0Out = multipliedValue.toString();
+            asset1In = asset1InBigInt.toString();
           }
           break;
           
@@ -916,15 +954,18 @@ class QubicClient {
           break;
       }
       
-      console.log(`🔍 Parsed (type ${inputType}) - pairId: ${pairId}, asset1Out: ${asset1Out}`);
+      console.log(`🔍 Parsed (type ${inputType}) - pairId: ${pairId}, asset1Out: ${asset1Out}, asset0In: ${asset0In}, asset1In: ${asset1In}, asset0Out: ${asset0Out}`);
       
       return {
         pairId: pairId,
-        asset1Out: asset1Out
+        asset1Out: asset1Out,
+        asset0In: asset0In,
+        asset1In: asset1In,
+        asset0Out: asset0Out
       };
     } catch (error) {
       console.error('❌ Error parsing inputHex:', error);
-      return { pairId: null, asset1Out: "0" };
+      return { pairId: null, asset1Out: "0", asset0In: "0", asset1In: "0", asset0Out: "0" };
     }
   }
 
